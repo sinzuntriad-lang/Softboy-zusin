@@ -8,24 +8,42 @@
  */
 
 const sessions = new Map(); // threadID -> { timer, stopFn, safety }
+let loggedOnce = false;
+
+function typingMethods(api) {
+  return {
+    sendTypingIndicator: typeof api?.sendTypingIndicator,
+    sendTyping: typeof api?.sendTyping
+  };
+}
 
 function sendIndicator(api, threadID, session) {
+  let shown = false;
+  // Use every typing method this ws3-fca version has (different versions expose different ones).
   try {
     if (typeof api.sendTypingIndicator === "function") {
       const r = api.sendTypingIndicator(String(threadID), (error) => {
-        if (error) console.warn("[HUMAN-TYPING] Typing indicator failed:", error?.message || error);
+        if (error) console.warn("[HUMAN-TYPING] sendTypingIndicator failed:", error?.message || error);
       });
       if (typeof r === "function") session.stopFn = r;
-      return true;
-    }
-    if (typeof api.sendTyping === "function") {
-      api.sendTyping(String(threadID), true);
-      return true;
+      shown = true;
     }
   } catch (error) {
-    console.warn("[HUMAN-TYPING] Unable to start typing indicator:", error?.message || error);
+    console.warn("[HUMAN-TYPING] sendTypingIndicator threw:", error?.message || error);
   }
-  return false;
+  try {
+    if (typeof api.sendTyping === "function") {
+      api.sendTyping(String(threadID), true);
+      shown = true;
+    }
+  } catch (error) {
+    console.warn("[HUMAN-TYPING] sendTyping threw:", error?.message || error);
+  }
+  if (!loggedOnce) {
+    loggedOnce = true;
+    console.log("[HUMAN-TYPING] typing indicator " + (shown ? "sent" : "NOT available") + " " + JSON.stringify(typingMethods(api)));
+  }
+  return shown;
 }
 
 function startTyping(api, threadID) {
@@ -79,4 +97,4 @@ function withTyping(api, threadID, durationMs, send) {
   });
 }
 
-module.exports = { startTyping, stopTyping, withTyping };
+module.exports = { startTyping, stopTyping, withTyping, typingMethods };
