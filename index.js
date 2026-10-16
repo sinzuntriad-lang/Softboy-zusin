@@ -38,6 +38,7 @@ const { getTriggerReply, getBanatConversationReply } = require("./triggers");
 const { sendBanatReplyWithTyping } = require("./banat-human");
 const { classifyBanatTarget, setBanatConversationMode, isBanatConversationModeActive } = require("./banat-targeting");
 const gc = require("./gc-controls");
+const { startTyping, stopTyping, typingMethods } = require("./human-typing");
 const { setPatayan, isPatayan, listPatayan } = require("./banat-patayan");
 
 // Dashboard has NO password by default. To protect it, set CELESTIAL_DASHBOARD_API_KEY on the host.
@@ -295,9 +296,12 @@ function commandSendMessage(api, message, threadID, replyToMessageID = null) {
 
 function sendCommandReply(api, event, message) {
   const threadID = String(event.threadID);
-  commandSendMessage(api, message, threadID, event.messageID || null)
+  startTyping(api, threadID); // show "typing..." for command replies too
+  sleep(Math.min(1500, 500 + String(message).length * 12))
+    .then(() => commandSendMessage(api, message, threadID, event.messageID || null))
     .then(() => { stats.sent++; console.log(`[BANAT] command reply sent: ${message}`); })
-    .catch(error => { noteError("command reply", error); console.error("[BANAT] command reply failed:", error?.message || error); });
+    .catch(error => { noteError("command reply", error); console.error("[BANAT] command reply failed:", error?.message || error); })
+    .finally(() => stopTyping(api, threadID));
 }
 
 function handleBanatCommand(api, event, body) {
@@ -532,6 +536,7 @@ function start(api, gen) {
     : (typeof api.stopListening === "function" ? () => api.stopListening() : null);
 
   console.log(`[BANAT] online${botUserID ? ` as ${botUserID}` : ""}`);
+  console.log("[BANAT] typing support:", JSON.stringify(typingMethods(api)));
 }
 
 // Stops the bot locally. Does NOT call api.logout(), so the Facebook cookie stays valid.
@@ -748,6 +753,7 @@ try {
     keepalive_url: KEEPALIVE_URL || null,
     last_keepalive: lastKeepAlive,
     last_heartbeat: lastHeartbeat,
+    typing_support: currentApi ? typingMethods(currentApi) : null,
     updated_at: new Date().toISOString()
   }), {
     setPaused: (paused) => { botPaused = Boolean(paused); },
