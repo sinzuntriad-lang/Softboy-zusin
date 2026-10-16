@@ -53,6 +53,11 @@ const DEFAULT_ON = /^(1|true|yes|on)$/i.test(process.env.BANAT_DEFAULT_ON || "fa
 const GLOBAL_SEND_LIMIT = Math.max(1, Number(process.env.BANAT_GLOBAL_SEND_LIMIT || 3));
 const THREAD_COOLDOWN_MS = Math.max(0, Number(process.env.BANAT_THREAD_COOLDOWN_MS || 2500));
 const RETRY_DELAYS = [1000, 3000, 6000];
+// Optional auto-off after this many replies per activation. 0 = unlimited (default).
+const REPLY_LIMIT = Math.max(0, Number(process.env.BANAT_REPLY_LIMIT ?? 0));
+const banatCount = new Map();
+const patayanCount = new Map();
+function resetCounts(threadID) { banatCount.set(String(threadID), 0); patayanCount.set(String(threadID), 0); }
 
 const activeThreads = new Set();
 const threadQueues = new Map();
@@ -312,8 +317,9 @@ function handleBanatCommand(api, event, body) {
   if (sub === "on" || sub === "enable" || sub === "start") {
     setBanatConversationMode(threadID, true, event.senderID);
     activeThreads.add(threadID);
+    resetCounts(threadID);
     console.log(`[BANAT] activated thread ${threadID} by ${event.senderID || "unknown"}`);
-    sendCommandReply(api, event, "banat is on. say whatever u want 😭");
+    sendCommandReply(api, event, "banat is on. say whatever u want 😭" + (REPLY_LIMIT ? ` (${REPLY_LIMIT} replies)` : ""));
     return true;
   }
 
@@ -328,7 +334,7 @@ function handleBanatCommand(api, event, body) {
   if (sub === "toggle") {
     const next = !isBanatConversationModeActive(threadID);
     setBanatConversationMode(threadID, next, event.senderID);
-    if (next) activeThreads.add(threadID);
+    if (next) { activeThreads.add(threadID); resetCounts(threadID); }
     else activeThreads.delete(threadID);
     console.log(`[BANAT] toggled thread ${threadID}: ${next ? "ON" : "OFF"}`);
     sendCommandReply(api, event, next ? "banat is on 😭" : "banat is off");
@@ -337,7 +343,7 @@ function handleBanatCommand(api, event, body) {
 
   if (sub === "status") {
     const on = activeThreads.has(threadID) || isBanatConversationModeActive(threadID);
-    sendCommandReply(api, event, on ? "banat: ON 🟢" : "banat: OFF 🔴");
+    sendCommandReply(api, event, on ? `banat: ON 🟢${REPLY_LIMIT ? ` (${banatCount.get(threadID) || 0}/${REPLY_LIMIT})` : ""}` : "banat: OFF 🔴");
     return true;
   }
 
@@ -346,7 +352,12 @@ function handleBanatCommand(api, event, body) {
     const next = arg === "on" ? true : arg === "off" ? false : arg === "status" ? isPatayan(threadID) : !isPatayan(threadID);
     if (arg !== "status") {
       setPatayan(threadID, next);
-      if (next) { setBanatConversationMode(threadID, true, event.senderID); activeThreads.add(threadID); }
+      if (next) {
+        const wasOn = activeThreads.has(threadID) || isBanatConversationModeActive(threadID);
+        setBanatConversationMode(threadID, true, event.senderID); activeThreads.add(threadID);
+        patayanCount.set(threadID, 0);
+        if (!wasOn) banatCount.set(threadID, 0);
+      }
     }
     sendCommandReply(api, event, arg === "status" ? (next ? "patayan: ON 💀" : "patayan: OFF") : next ? "PATAYAN MODE ON 💀 walang awa na 'to" : "patayan off. tahimik na");
     return true;
@@ -441,12 +452,40 @@ async function sendBanat(api, event, text) {
       trafficSendMessage,
       incomingText: event.body || ""
     });
+    if (result) countReply(api, event);
     stats.sent++;
     pushEvent("reply", `thread ${event.threadID}: ${String(text).slice(0, 60)}`);
     return result;
   } catch (error) {
     noteError("reply", error);
     throw error;
+  }
+}
+
+function countReply(api, event) {
+  if (!REPLY_LIMIT) return;
+  const t = String(event.threadID);
+  if (!(activeThreads.has(t) || isBanatConversationModeActive(t))) return;
+
+  const b = (banatCount.get(t) || 0) + 1;
+  banatCount.set(t, b);
+  let p = 0;
+  if (isPatayan(t)) { p = (patayanCount.get(t) || 0) + 1; patayanCount.set(t, p); }
+
+  if (b >= REPLY_LIMIT) {
+    setBanatConversationMode(t, false);
+    activeThreads.delete(t);
+    setPatayan(t, false);
+    banatCount.delete(t); patayanCount.delete(t);
+    pushEvent("limit", `thread ${t}: banat reached ${REPLY_LIMIT} replies, turned off`);
+    sendCommandReply(api, event, `naabot na ang ${REPLY_LIMIT} replies. banat off na. !banat on ulit para ituloy 😭`);
+    return;
+  }
+  if (p >= REPLY_LIMIT) {
+    setPatayan(t, false);
+    patayanCount.delete(t);
+    pushEvent("limit", `thread ${t}: patayan reached ${REPLY_LIMIT} replies, turned off`);
+    sendCommandReply(api, event, `patayan tapos na (${REPLY_LIMIT} replies). !banat patayan on ulit para sa panibago 💀`);
   }
 }
 
@@ -522,6 +561,7 @@ function start(api, gen) {
         if (!activeThreads.has(key)) {
           activeThreads.add(key);
           setBanatConversationMode(key, true, event.senderID);
+          resetCounts(key);
         }
       }
       onMessage(api, event);
@@ -740,6 +780,7 @@ try {
     threads_in_cooldown: threadsInCooldown(),
     default_on: DEFAULT_ON,
     global_send_limit: GLOBAL_SEND_LIMIT,
+    reply_limit: REPLY_LIMIT,
     thread_cooldown_ms: THREAD_COOLDOWN_MS,
     auto_reconnect: !manualStop,
     reconnect_attempts: reconnectAttempts,
@@ -770,7 +811,12 @@ try {
         if (!id) throw new Error("threadID is required");
         const on = action === "patayan-on";
         setPatayan(id, on);
-        if (on) { setBanatConversationMode(id, true, "dashboard"); activeThreads.add(id); }
+        if (on) {
+          const wasOn = activeThreads.has(id) || isBanatConversationModeActive(id);
+          setBanatConversationMode(id, true, "dashboard"); activeThreads.add(id);
+          patayanCount.set(id, 0);
+          if (!wasOn) banatCount.set(id, 0);
+        }
         pushEvent("gc", `patayan ${on ? "ON" : "OFF"} ${id}`);
         return { message: on ? "PATAYAN MODE ON 💀" : "Patayan off" };
       }
@@ -883,4 +929,4 @@ setInterval(guard, 60000).unref();
 
 loginBot();
 
-module.exports = { trafficSendMessage, onMessage, handleBanatCommand };
+module.exports = { trafficSendMessage, onMessage, handleBanatCommand, countReply };
