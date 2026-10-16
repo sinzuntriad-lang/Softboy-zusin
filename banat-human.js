@@ -7,13 +7,13 @@ const { calculateHumanDelay } = require("./human-delay");
 const { startTyping, stopTyping } = require("./human-typing");
 
 const REPLY_DELAY_MS = Math.max(0, Number(process.env.BANAT_REPLY_DELAY_MS || 250));
-const MAX_DELAY_MS = Math.max(600, Number(process.env.BANAT_MAX_HUMAN_DELAY_MS || 2400));
+const MAX_DELAY_MS = Math.max(600, Number(process.env.BANAT_MAX_HUMAN_DELAY_MS || 2800));
 // FAST MODE: quick reaction + fast typing. Tune with env vars if you want it slower/faster.
 const REACTION_MAX_MS = Math.max(150, Number(process.env.BANAT_REACTION_MAX_MS || 600));
 const SPEED_MIN_CPS = Math.max(5, Number(process.env.BANAT_MIN_CPS || 16));
 const SPEED_MAX_CPS = Math.max(SPEED_MIN_CPS, Number(process.env.BANAT_MAX_CPS || 28));
 // Typing bubble stays visible at least this long so people actually see "typing..."
-const MIN_TYPING_MS = Math.max(300, Number(process.env.BANAT_MIN_TYPING_MS || 900));
+const MIN_TYPING_MS = Math.max(300, Number(process.env.BANAT_MIN_TYPING_MS || 1200));
 const state = new Map();
 
 function createHumanContext(threadID, incomingText = "") {
