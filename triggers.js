@@ -2,6 +2,7 @@
 
 const { rememberBanatReply, pickBanatReply } = require("./banat-memory");
 const { isPatayan, getPatayanReply } = require("./banat-patayan");
+const { BANAT_ON_REPLIES } = require("./banat-pool");
 
 // Banat-only local reply pools. Nothing here calls an AI service.
 const groups = [
@@ -377,7 +378,7 @@ function getBanatConversationReply(body, threadID = "") {
   const direct = getTriggerReply(body, threadID);
   if (direct) return direct;
   if (isPatayan(threadID)) return getPatayanReply(threadID);
-  const fallback = groups.flatMap(g => g.replies);
+  const fallback = groups.flatMap(g => g.replies).concat(BANAT_ON_REPLIES);
   const reply = pickBanatReply(threadID, fallback);
   if (reply) rememberBanatReply(threadID, reply);
   return reply;
